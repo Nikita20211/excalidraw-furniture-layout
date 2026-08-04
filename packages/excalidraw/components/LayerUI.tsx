@@ -311,6 +311,7 @@ const LayerUI = ({
                               activeTool={appState.activeTool}
                               UIOptions={UIOptions}
                               app={app}
+                              actionManager={actionManager}
                             />
                           </Stack.Row>
                         </Island>

@@ -55,7 +55,6 @@ import Collab, {
   isOfflineAtom,
 } from "./collab/Collab";
 import {
-  exportToBackend,
   getCollaborationLinkData,
   isCollaborationLink,
   loadScene,
@@ -71,6 +70,7 @@ import {
   ExportToExcalidrawPlus,
   exportToExcalidrawPlus,
 } from "./components/ExportToExcalidrawPlus";
+import { SaveToServerExportCard } from "./components/eventbooking/SaveToServerExportCard";
 import { updateStaleImageStatuses } from "./data/FileManager";
 import { newElementWith } from "../packages/excalidraw/element/mutateElement";
 import { isInitializedImageElement } from "../packages/excalidraw/element/typeChecks";
@@ -81,6 +81,16 @@ import {
   LocalData,
 } from "./data/LocalData";
 import { isBrowserStorageStateNewer } from "./data/tabSync";
+import {
+  BackendSync,
+  fetchScene,
+  getEventBookingParams,
+  setEventBookingParams,
+  reissueToken,
+  rehydrateGalleryFiles,
+  type EventBookingParams,
+} from "./data/backendSync";
+import { buildPlanImageElement } from "./data/planImage";
 import clsx from "clsx";
 import {
   parseLibraryTokensFromUrl,
@@ -88,6 +98,8 @@ import {
 } from "../packages/excalidraw/data/library";
 import { AppMainMenu } from "./components/AppMainMenu";
 import { AppWelcomeScreen } from "./components/AppWelcomeScreen";
+import { InviteManagerTopButton } from "./components/eventbooking/InviteManagerTopButton";
+import { WelcomeNotice } from "./components/eventbooking/WelcomeNotice";
 import { AppFooter } from "./components/AppFooter";
 import { Provider, useAtom, useAtomValue } from "jotai";
 import { useAtomWithInitialValue } from "../packages/excalidraw/jotai";
@@ -95,7 +107,6 @@ import { appJotaiStore } from "./app-jotai";
 
 import "./index.scss";
 import type { ResolutionType } from "../packages/excalidraw/utility-types";
-import { ShareableLinkDialog } from "../packages/excalidraw/components/ShareableLinkDialog";
 import { openConfirmModal } from "../packages/excalidraw/components/OverwriteConfirm/OverwriteConfirmState";
 import { OverwriteConfirmDialog } from "../packages/excalidraw/components/OverwriteConfirm/OverwriteConfirm";
 import Trans from "../packages/excalidraw/components/Trans";
@@ -195,6 +206,46 @@ const initializeScene = async (opts: {
     | { isExternalScene: false; id?: null; key?: null }
   )
 > => {
+  const eventBookingParams = getEventBookingParams();
+  if (eventBookingParams) {
+    // Доска чата EventBooking — отдельная ветка вместо localStorage/collab:
+    // сцена приходит с бэкенда по chatId/token, реалтайм-коллаборация (если
+    // включена конфигом комнаты) продолжает работать поверх неё как обычно.
+    const response = await fetchScene(eventBookingParams.token);
+    const parsedScene = response.scene ? JSON.parse(response.scene) : null;
+    let files = { ...(parsedScene?.files || {}) };
+
+    let planImageElement = null;
+    if (response.plan_image_url) {
+      const planImage = await buildPlanImageElement(response.plan_image_url);
+      planImageElement = planImage.element;
+      files = { ...files, ...planImage.files };
+    }
+
+    const baseElements = (parsedScene?.elements || []) as any[];
+
+    // Фото площадки из галереи хранятся в scene_data только как элементы
+    // (позиция/размер) — сами байты вырезаются при сохранении
+    // (stripServerSourcedFiles) и дотягиваются здесь заново, если на них
+    // вообще есть ссылки в загруженной сцене.
+    files = await rehydrateGalleryFiles(
+      eventBookingParams.token,
+      baseElements,
+      files,
+    );
+
+    return {
+      scene: {
+        elements: planImageElement
+          ? [planImageElement, ...baseElements]
+          : baseElements,
+        appState: parsedScene?.appState || {},
+        files: files as any,
+      },
+      isExternalScene: false,
+    };
+  }
+
   const searchParams = new URLSearchParams(window.location.search);
   const id = searchParams.get("id");
   const jsonBackendMatch = window.location.hash.match(
@@ -350,6 +401,92 @@ const ExcalidrawWrapper = () => {
 
   const [excalidrawAPI, excalidrawRefCallback] =
     useCallbackRefState<ExcalidrawImperativeAPI>();
+
+  // Доска, привязанная к чату EventBooking (chatId+token в URL) — читается
+  // один раз при загрузке страницы (initializeScene) и обновляется целиком
+  // при переключении на другую доску из списка "Открыть" (см. switchBoard
+  // ниже). Ref нужен, чтобы onChange (замыкание, созданное один раз) видел
+  // актуальный token без пересоздания самого onChange.
+  const [eventBookingParams, setEventBookingParamsState] =
+    useState<EventBookingParams | null>(() => getEventBookingParams());
+  const eventBookingParamsRef = useRef(eventBookingParams);
+  useEffect(() => {
+    eventBookingParamsRef.current = eventBookingParams;
+  }, [eventBookingParams]);
+
+  /**
+   * Переключает текущую вкладку рисовалки на доску другого чата — первый
+   * шаг выбора элемента в "Открыть" (BoardPickerDialog): переиздаёт токен
+   * на целевой chat_id и обновляет URL, ПОСЛЕ ЧЕГО дальнейший автосейв идёт
+   * уже в новый чат. Саму сцену (get-scene для автосохранения или
+   * load-snapshot для ручного) запрашивает и применяет вызывающий код
+   * (BoardPickerDialog) через onApplyScene — этот метод только "переключает
+   * личность" вкладки.
+   */
+  const onReissueToken = useCallback(
+    async (targetChatId: number): Promise<EventBookingParams | null> => {
+      if (!eventBookingParamsRef.current) {
+        return null;
+      }
+      const reissued = await reissueToken(
+        eventBookingParamsRef.current.token,
+        targetChatId,
+      );
+      const nextParams: EventBookingParams = {
+        chatId: String(reissued.chat_id),
+        token: reissued.token,
+      };
+      setEventBookingParams(nextParams);
+      setEventBookingParamsState(nextParams);
+      return nextParams;
+    },
+    [],
+  );
+
+  /**
+   * Применяет полученную сцену (после onReissueToken) к текущему канвасу —
+   * общий код для автосохранений и ручных снимков, включая фон плана
+   * помещения (если он есть у целевого чата).
+   */
+  const onApplyScene = useCallback(
+    async (
+      scenePayload: {
+        elements?: unknown;
+        appState?: unknown;
+        files?: unknown;
+      } | null,
+      planImageUrl: string | null,
+    ) => {
+      if (!excalidrawAPI) {
+        return;
+      }
+
+      let files: BinaryFiles = { ...((scenePayload?.files || {}) as BinaryFiles) };
+      let planImageElement = null;
+      if (planImageUrl) {
+        const planImage = await buildPlanImageElement(planImageUrl);
+        planImageElement = planImage.element;
+        files = { ...files, ...planImage.files };
+      }
+
+      if (Object.keys(files).length) {
+        excalidrawAPI.addFiles(files);
+      }
+
+      const existingElements = (scenePayload?.elements ||
+        []) as OrderedExcalidrawElement[];
+
+      excalidrawAPI.updateScene({
+        elements: planImageElement
+          ? [planImageElement as any, ...existingElements]
+          : existingElements,
+        appState: (scenePayload?.appState || {}) as any,
+        storeAction: StoreAction.CAPTURE,
+      });
+      excalidrawAPI.scrollToContent();
+    },
+    [excalidrawAPI],
+  );
 
   const [, setShareDialogState] = useAtom(shareDialogStateAtom);
   const [collabAPI] = useAtom(collabAPIAtom);
@@ -550,11 +687,13 @@ const ExcalidrawWrapper = () => {
 
     const onUnload = () => {
       LocalData.flushSave();
+      BackendSync.flushSave();
     };
 
     const visibilityChange = (event: FocusEvent | Event) => {
       if (event.type === EVENT.BLUR || document.hidden) {
         LocalData.flushSave();
+        BackendSync.flushSave();
       }
       if (
         event.type === EVENT.VISIBILITY_CHANGE ||
@@ -586,6 +725,7 @@ const ExcalidrawWrapper = () => {
   useEffect(() => {
     const unloadHandler = (event: BeforeUnloadEvent) => {
       LocalData.flushSave();
+      BackendSync.flushSave();
 
       if (
         excalidrawAPI &&
@@ -609,6 +749,15 @@ const ExcalidrawWrapper = () => {
   ) => {
     if (collabAPI?.isCollaborating()) {
       collabAPI.syncElements(elements);
+    }
+
+    if (eventBookingParamsRef.current) {
+      BackendSync.save(
+        eventBookingParamsRef.current.token,
+        elements,
+        appState,
+        files,
+      );
     }
 
     // this check is redundant, but since this is a hot path, it's best
@@ -651,50 +800,6 @@ const ExcalidrawWrapper = () => {
         window.devicePixelRatio,
         () => forceRefresh((prev) => !prev),
       );
-    }
-  };
-
-  const [latestShareableLink, setLatestShareableLink] = useState<string | null>(
-    null,
-  );
-
-  const onExportToBackend = async (
-    exportedElements: readonly NonDeletedExcalidrawElement[],
-    appState: Partial<AppState>,
-    files: BinaryFiles,
-  ) => {
-    if (exportedElements.length === 0) {
-      throw new Error(t("alerts.cannotExportEmptyCanvas"));
-    }
-    try {
-      const { url, errorMessage } = await exportToBackend(
-        exportedElements,
-        {
-          ...appState,
-          viewBackgroundColor: appState.exportBackground
-            ? appState.viewBackgroundColor
-            : getDefaultAppState().viewBackgroundColor,
-        },
-        files,
-      );
-
-      if (errorMessage) {
-        throw new Error(errorMessage);
-      }
-
-      if (url) {
-        setLatestShareableLink(url);
-      }
-    } catch (error: any) {
-      if (error.name !== "AbortError") {
-        const { width, height } = appState;
-        console.error(error, {
-          width,
-          height,
-          devicePixelRatio: window.devicePixelRatio,
-        });
-        throw new Error(error.message);
-      }
     }
   };
 
@@ -754,27 +859,47 @@ const ExcalidrawWrapper = () => {
           canvasActions: {
             toggleTheme: true,
             export: {
-              onExportToBackend,
               renderCustomUI: excalidrawAPI
                 ? (elements, appState, files) => {
+                    const onError = (error: Error) => {
+                      excalidrawAPI?.updateScene({
+                        appState: {
+                          errorMessage: error.message,
+                        },
+                      });
+                    };
+                    const onSuccess = () => {
+                      excalidrawAPI.updateScene({
+                        appState: { openDialog: null },
+                      });
+                    };
+
+                    // Карточка "Excalidraw+" вела на настоящий Excalidraw+
+                    // через Firebase Storage, которого у нас больше нет —
+                    // в EventBooking-контексте (всегда есть chatId/token)
+                    // заменяем её на сохранение снимка на нашем сервере
+                    // (то же самое, что бургер-меню "Сохранить на сервер").
+                    if (eventBookingParams) {
+                      return (
+                        <SaveToServerExportCard
+                          token={eventBookingParams.token}
+                          elements={elements}
+                          appState={appState}
+                          files={files}
+                          onError={onError}
+                          onSuccess={onSuccess}
+                        />
+                      );
+                    }
+
                     return (
                       <ExportToExcalidrawPlus
                         elements={elements}
                         appState={appState}
                         files={files}
                         name={excalidrawAPI.getName()}
-                        onError={(error) => {
-                          excalidrawAPI?.updateScene({
-                            appState: {
-                              errorMessage: error.message,
-                            },
-                          });
-                        }}
-                        onSuccess={() => {
-                          excalidrawAPI.updateScene({
-                            appState: { openDialog: null },
-                          });
-                        }}
+                        onError={onError}
+                        onSuccess={onSuccess}
                       />
                     );
                   }
@@ -795,6 +920,12 @@ const ExcalidrawWrapper = () => {
           return (
             <div className="top-right-ui">
               {collabError.message && <CollabError collabError={collabError} />}
+              {eventBookingParams && (
+                <InviteManagerTopButton
+                  token={eventBookingParams.token}
+                  collabAPI={collabAPI}
+                />
+              )}
               <LiveCollaborationTrigger
                 isCollaborating={isCollaborating}
                 onSelect={() =>
@@ -818,6 +949,10 @@ const ExcalidrawWrapper = () => {
           theme={appTheme}
           setTheme={(theme) => setAppTheme(theme)}
           refresh={() => forceRefresh((prev) => !prev)}
+          eventBookingParams={eventBookingParams}
+          excalidrawAPI={excalidrawAPI}
+          onReissueToken={onReissueToken}
+          onApplyScene={onApplyScene}
         />
         <AppWelcomeScreen
           onCollabDialogOpen={onCollabDialogOpen}
@@ -852,33 +987,11 @@ const ExcalidrawWrapper = () => {
             {t("alerts.collabOfflineWarning")}
           </div>
         )}
-        {latestShareableLink && (
-          <ShareableLinkDialog
-            link={latestShareableLink}
-            onCloseRequest={() => setLatestShareableLink(null)}
-            setErrorMessage={setErrorMessage}
-          />
-        )}
         {excalidrawAPI && !isCollabDisabled && (
           <Collab excalidrawAPI={excalidrawAPI} />
         )}
 
-        <ShareDialog
-          collabAPI={collabAPI}
-          onExportToBackend={async () => {
-            if (excalidrawAPI) {
-              try {
-                await onExportToBackend(
-                  excalidrawAPI.getSceneElements(),
-                  excalidrawAPI.getAppState(),
-                  excalidrawAPI.getFiles(),
-                );
-              } catch (error: any) {
-                setErrorMessage(error.message);
-              }
-            }
-          }}
-        />
+        <ShareDialog collabAPI={collabAPI} />
 
         {errorMessage && (
           <ErrorDialog onClose={() => setErrorMessage("")}>
@@ -1000,6 +1113,12 @@ const ExcalidrawWrapper = () => {
           />
         )}
       </Excalidraw>
+      {eventBookingParams && (
+        <WelcomeNotice
+          token={eventBookingParams.token}
+          excalidrawAPI={excalidrawAPI}
+        />
+      )}
     </div>
   );
 };

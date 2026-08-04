@@ -464,4 +464,7 @@ export const FILE_SAVE_URL = "/api/save-file";
 export const FILE_LOAD_URL = "/api/load-file";
 
 // Whether to save file locally or to send request
-export const SAVE_TO_SERVER = true;
+// (false: "Сохранить на диск"/library export save via the browser's native
+// file dialog, as their own label promises — no self-hosted /api/save-file
+// backend exists for this, that endpoint is 404 here)
+export const SAVE_TO_SERVER = false;

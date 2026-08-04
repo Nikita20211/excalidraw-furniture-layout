@@ -89,6 +89,7 @@ export const MobileMenu = ({
                       activeTool={appState.activeTool}
                       UIOptions={UIOptions}
                       app={app}
+                      actionManager={actionManager}
                     />
                   </Stack.Row>
                 </Island>

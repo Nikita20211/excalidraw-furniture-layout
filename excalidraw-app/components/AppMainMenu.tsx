@@ -1,10 +1,16 @@
 import React from "react";
 import { eyeIcon } from "../../packages/excalidraw/components/icons";
 import type { Theme } from "../../packages/excalidraw/element/types";
+import type { ExcalidrawImperativeAPI } from "../../packages/excalidraw/types";
 import { MainMenu } from "../../packages/excalidraw/index";
 import { LanguageList } from "../app-language/LanguageList";
 import { saveDebugState } from "./DebugCanvas";
 import { t } from "../../packages/excalidraw/i18n";
+import type { EventBookingParams } from "../data/backendSync";
+import { MenuSaveItem } from "./eventbooking/MenuSaveItem";
+import { MenuOpenItem } from "./eventbooking/MenuOpenItem";
+import { MenuInviteItem } from "./eventbooking/MenuInviteItem";
+import { MenuGalleryItem } from "./eventbooking/MenuGalleryItem";
 
 export const AppMainMenu: React.FC<{
   onCollabDialogOpen: () => any;
@@ -13,11 +19,41 @@ export const AppMainMenu: React.FC<{
   theme: Theme | "system";
   setTheme: (theme: Theme | "system") => void;
   refresh: () => void;
+  eventBookingParams: EventBookingParams | null;
+  excalidrawAPI: ExcalidrawImperativeAPI | null;
+  onReissueToken: (chatId: number) => Promise<EventBookingParams | null>;
+  onApplyScene: (
+    scene: { elements?: unknown; appState?: unknown; files?: unknown } | null,
+    planImageUrl: string | null,
+  ) => Promise<void>;
 }> = React.memo((props) => {
+  const { eventBookingParams } = props;
+
   return (
     <MainMenu>
-      <MainMenu.DefaultItems.LoadScene />
-      <MainMenu.DefaultItems.SaveToActiveFile />
+      {eventBookingParams ? (
+        <>
+          <MenuSaveItem
+            token={eventBookingParams.token}
+            excalidrawAPI={props.excalidrawAPI}
+          />
+          <MenuOpenItem
+            eventBookingParams={eventBookingParams}
+            onReissueToken={props.onReissueToken}
+            onApplyScene={props.onApplyScene}
+          />
+          <MenuInviteItem token={eventBookingParams.token} />
+          <MenuGalleryItem
+            token={eventBookingParams.token}
+            excalidrawAPI={props.excalidrawAPI}
+          />
+        </>
+      ) : (
+        <>
+          <MainMenu.DefaultItems.LoadScene />
+          <MainMenu.DefaultItems.SaveToActiveFile />
+        </>
+      )}
       <MainMenu.DefaultItems.Export />
       <MainMenu.DefaultItems.SaveAsImage />
       {props.isCollabEnabled && (

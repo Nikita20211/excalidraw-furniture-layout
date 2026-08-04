@@ -148,11 +148,40 @@ export const generateCollaborationLinkData = async () => {
   return { roomId, roomKey };
 };
 
+/**
+ * Сохраняет ?chatId=&token= в адресной строке рядом с #room=... — без этого
+ * запуск Live Collaboration стирал query-строку через history.pushState, и
+ * любая перезагрузка ЭТОЙ ЖЕ вкладки (F5, восстановление сессии браузером и
+ * т.п.) после старта сессии теряла привязку к чату: пропадали пункты меню
+ * EventBooking ("Сохранить на сервер"/"Открыть"/"Пригласить менеджера") и
+ * автосейв в чат — initializeScene() встречал URL без chatId/token и
+ * откатывался к стоковому поведению Excalidraw.
+ */
 export const getCollaborationLink = (data: {
   roomId: string;
   roomKey: string;
 }) => {
-  return `${window.location.origin}${window.location.pathname}#room=${data.roomId},${data.roomKey}`;
+  return `${window.location.origin}${window.location.pathname}${window.location.search}#room=${data.roomId},${data.roomKey}`;
+};
+
+/**
+ * activeRoomLink (см. Collab.tsx::setActiveRoomLink) читается из
+ * window.location.href и теперь, из-за getCollaborationLink() выше, может
+ * содержать chatId/token ТЕКУЩЕГО пользователя — использовать эту ссылку
+ * как есть где угодно, кроме адресной строки СВОЕЙ вкладки (например,
+ * отправить её другому человеку через "Пригласить менеджера" или скопировать
+ * через "Поделиться"), нельзя: получатель тогда сможет действовать под
+ * токеном (и, соответственно, личностью) отправителя во всех его чатах.
+ * Эта функция вырезает всё, кроме #room=..., перед тем как отдать ссылку
+ * наружу.
+ */
+export const stripEventBookingParamsFromRoomLink = (link: string): string => {
+  try {
+    const url = new URL(link);
+    return `${url.origin}${url.pathname}${url.hash}`;
+  } catch {
+    return link;
+  }
 };
 
 /**

@@ -376,6 +376,18 @@ export const EraserIcon = createIcon(
   tablerIconProps,
 );
 
+export const GridIcon = createIcon(
+  <g strokeWidth="1.5">
+    <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+    <rect x="4" y="4" width="16" height="16" rx="1" />
+    <path d="M4 9.333h16" />
+    <path d="M4 14.667h16" />
+    <path d="M9.333 4v16" />
+    <path d="M14.667 4v16" />
+  </g>,
+  tablerIconProps,
+);
+
 export const ZoomInIcon = createIcon(
   <path strokeWidth="1.25" d="M10 4.167v11.666M4.167 10h11.666" />,
   modifiedTablerIconProps,

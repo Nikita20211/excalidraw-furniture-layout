@@ -32,7 +32,7 @@ import {
   isTextElement,
 } from "../element/typeChecks";
 import clsx from "clsx";
-import { actionToggleZenMode } from "../actions";
+import { actionToggleZenMode, actionToggleGridMode } from "../actions";
 import { Tooltip } from "./Tooltip";
 import { LaserPointerButton } from "./LaserPointerButton";
 import {
@@ -48,6 +48,7 @@ import {
   frameToolIcon,
   mermaidLogoIcon,
   MagicIcon,
+  GridIcon,
 } from "./icons";
 import { KEYS } from "../keys";
 import { useTunnels } from "../context/tunnels";
@@ -273,11 +274,13 @@ export const ShapesSwitcher = ({
   appState,
   app,
   UIOptions,
+  actionManager,
 }: {
   activeTool: UIAppState["activeTool"];
   appState: UIAppState;
   app: AppClassProperties;
   UIOptions: AppProps["UIOptions"];
+  actionManager: ActionManager;
 }) => {
   const [isExtraToolsMenuOpen, setIsExtraToolsMenuOpen] = useState(false);
 
@@ -339,6 +342,17 @@ export const ShapesSwitcher = ({
           />
         );
       })}
+
+      <ToolButton
+        className="Shape"
+        type="icon"
+        icon={GridIcon}
+        selected={appState.gridModeEnabled}
+        title={t("labels.toggleGrid")}
+        aria-label={t("labels.toggleGrid")}
+        data-testid="toolbar-toggleGrid"
+        onClick={() => actionManager.executeAction(actionToggleGridMode)}
+      />
 
       {!isMobile && (
         <LaserPointerButton
