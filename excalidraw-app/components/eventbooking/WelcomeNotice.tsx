@@ -15,9 +15,17 @@ import "./WelcomeNotice.scss";
 export const WelcomeNotice = ({
   token,
   excalidrawAPI,
+  isAccountLevel = false,
 }: {
   token: string;
   excalidrawAPI: ExcalidrawImperativeAPI | null;
+  /**
+   * Токен без привязки к чату (chatId=0, "стандартное" открытие рисовалки
+   * без ссылки из чата, см. DrawingController::actionUserTokenRedirect) —
+   * фото площадки грузить неоткуда (нет ChatProduct), вместо кнопки
+   * показываем призыв открыть одну из уже сохранённых досок.
+   */
+  isAccountLevel?: boolean;
 }) => {
   const [isVisible, setIsVisible] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -25,6 +33,33 @@ export const WelcomeNotice = ({
 
   if (!isVisible) {
     return null;
+  }
+
+  if (isAccountLevel) {
+    return (
+      <div className="eb-welcome-notice">
+        <div className="eb-welcome-notice__header">
+          <div className="eb-welcome-notice__title">
+            Инструмент планирования мероприятия
+          </div>
+          <button
+            type="button"
+            className="eb-welcome-notice__close"
+            onClick={() => setIsVisible(false)}
+            aria-label="Закрыть"
+          >
+            ✕
+          </button>
+        </div>
+        <p className="eb-welcome-notice__text">
+          Вы открыли планировщик без привязки к конкретному чату. Выберите
+          одну из ваших сохранённых досок в пункте меню «Открыть» (значок в
+          левом верхнем углу), либо начните рисовать прямо здесь — при
+          нажатии «Сохранить на сервер» это станет вашей личной доской, не
+          привязанной ни к одному чату.
+        </p>
+      </div>
+    );
   }
 
   const handleLoadPhotos = async () => {

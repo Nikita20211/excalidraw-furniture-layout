@@ -12,6 +12,7 @@ import {
   VERSION_TIMEOUT,
 } from "../packages/excalidraw/constants";
 import { loadFromBlob } from "../packages/excalidraw/data/blob";
+import eventBookingDefaultLibrary from "./data/eventbooking-default-library.excalidrawlib.json";
 import type {
   FileId,
   NonDeletedExcalidrawElement,
@@ -208,6 +209,20 @@ const initializeScene = async (opts: {
 > => {
   const eventBookingParams = getEventBookingParams();
   if (eventBookingParams) {
+    // chatId="0" — личная доска аккаунтного уровня (см. AppMainMenu.tsx):
+    // "стандартное" открытие https://excalidraw.new.local всегда должно
+    // давать чистый лист, а не автовосстанавливать то, что было на нём в
+    // прошлый раз — автосейва для этого режима нет (см. onChange ниже),
+    // поэтому и подгружать здесь нечего. Явные "Сохранить"/"Открыть"
+    // (ручные снимки chat_drawing_snapshot) по-прежнему работают — просто
+    // не автоподгружаются при обычном заходе.
+    if (eventBookingParams.chatId === "0") {
+      return {
+        scene: { elements: [], appState: {}, files: {} },
+        isExternalScene: false,
+      };
+    }
+
     // Доска чата EventBooking — отдельная ветка вместо localStorage/collab:
     // сцена приходит с бэкенда по chatId/token, реалтайм-коллаборация (если
     // включена конфигом комнаты) продолжает работать поверх неё как обычно.
@@ -244,6 +259,26 @@ const initializeScene = async (opts: {
       },
       isExternalScene: false,
     };
+  }
+
+  // "Стандартное" открытие рисовалки — https://excalidraw.new.local без
+  // chatId/token и без каких-либо других признаков внешней сцены (room,
+  // json, url, id). У рисовалки нет сессии (отдельный поддомен без общих
+  // cookie с eventbooking.new.local), поэтому вместо no-op редиректим на
+  // сессионный экшен, который сам выпишет "аккаунтный" токен (chat_id=0,
+  // выше уровня одного чата — actionListBoards() и так использует из него
+  // только user_id) и вернёт обратно уже с ?chatId=0&token=... — после
+  // этого редиректа рисовалка попадает в обычную ветку eventBookingParams
+  // выше, просто с пустой доской и работающим пунктом меню "Открыть" на
+  // все сохранённые доски пользователя.
+  const hasAnyExternalIndicator =
+    !!new URLSearchParams(window.location.search).get("id") ||
+    /^#(json|room|url)=/.test(window.location.hash);
+  if (!hasAnyExternalIndicator) {
+    window.location.href =
+      "https://eventbooking.new.local/drawing/user-token-redirect";
+    // ничего больше не инициализируем, пока браузер не уйдёт по редиректу
+    return new Promise<never>(() => {});
   }
 
   const searchParams = new URLSearchParams(window.location.search);
@@ -569,7 +604,20 @@ const ExcalidrawWrapper = () => {
               elements: excalidrawAPI.getSceneElementsIncludingDeleted(),
             });
           });
-        } else if (isInitialLoad) {
+        } else if (isInitialLoad && !eventBookingParamsRef.current) {
+          // LocalData.fileStorage — общий на весь ОРИГИН (IndexedDB, не
+          // привязан к конкретной доске/вкладке) кэш файлов для стокового
+          // локального режима Excalidraw (один документ на весь браузер).
+          // У наших досок свой собственный набор файлов уже полностью
+          // приходит с бэкенда (buildPlanImageElement/rehydrateGalleryFiles
+          // в initializeScene) — трогать этот общий кэш нельзя вовсе: у
+          // всех досок один и тот же PLAN_IMAGE_FILE_ID (константа, не
+          // per-chat), так что getFiles() тут же подменял план помещения
+          // чужим кэшированным файлом из другой вкладки/доски, а
+          // clearObsoleteFiles ещё и удалял из этого общего кэша файлы
+          // ДРУГИХ досок, которых нет в текущей — именно поэтому несколько
+          // одновременно открытых вкладок с разными досками "сливались" в
+          // одну после перезагрузки.
           if (fileIds.length) {
             LocalData.fileStorage
               .getFiles(fileIds)
@@ -593,7 +641,16 @@ const ExcalidrawWrapper = () => {
 
     initializeScene({ collabAPI, excalidrawAPI }).then(async (data) => {
       loadImages(data, /* isInitialLoad */ true);
-      initialStatePromiseRef.current.promise.resolve(data.scene);
+      // Стандартный набор мебели/декора EventBooking — грузится вместе со
+      // сценой в личную библиотеку каждого пользователя (merge: true в
+      // App.tsx библиотеки, см. packages/excalidraw/components/App.tsx),
+      // без похода на внешний libraries.excalidraw.com. Дедуп по составу
+      // элементов (isUniqueItem), так что повторные загрузки страницы не
+      // плодят дубли.
+      initialStatePromiseRef.current.promise.resolve({
+        ...(data.scene || {}),
+        libraryItems: eventBookingDefaultLibrary.libraryItems as any,
+      });
     });
 
     const onHashChange = async (event: HashChangeEvent) => {
@@ -628,6 +685,19 @@ const ExcalidrawWrapper = () => {
 
     const syncData = debounce(() => {
       if (isTestEnv()) {
+        return;
+      }
+      // Стоковая "синхронизация между вкладками браузера" — на фокус/смену
+      // видимости подтягивает elements/files из ОБЩЕГО localStorage/
+      // IndexedDB происхождения, предполагая (как и LocalData.fileStorage,
+      // см. loadImages выше), что все вкладки — это ОДИН общий документ.
+      // У нас же каждая вкладка — независимая доска своего чата: при
+      // переключении между вкладками эта синхронизация тут же затирала
+      // текущую доску содержимым другой открытой вкладки. Полностью
+      // отключаем её для EventBooking-досок — свою синхронизацию (в
+      // рамках ОДНОЙ доски, между собой и совместно редактирующими) мы
+      // ведём отдельно через BackendSync/collab.
+      if (eventBookingParamsRef.current) {
         return;
       }
       if (
@@ -751,7 +821,14 @@ const ExcalidrawWrapper = () => {
       collabAPI.syncElements(elements);
     }
 
-    if (eventBookingParamsRef.current) {
+    // chatId="0" — аккаунтный токен без привязки к чату (см. AppMainMenu.tsx):
+    // "стандартное" открытие всегда должно давать чистый лист, поэтому
+    // автосейва тут нет вовсе — только явное "Сохранить" (ручной снимок,
+    // saveSnapshot), не привязанное к automatic restore при следующем заходе.
+    if (
+      eventBookingParamsRef.current &&
+      eventBookingParamsRef.current.chatId !== "0"
+    ) {
       BackendSync.save(
         eventBookingParamsRef.current.token,
         elements,
@@ -760,9 +837,16 @@ const ExcalidrawWrapper = () => {
       );
     }
 
+    // Наши доски не используют стоковое локальное хранилище Excalidraw
+    // вовсе (свой backend), а главное — LocalData.fileStorage (IndexedDB) в
+    // нём общий на весь ОРИГИН, а не per-board: писать туда файлы каждой
+    // доски (включая PLAN_IMAGE_FILE_ID — одну и ту же константу для ВСЕХ
+    // досок) means нескольким одновременно открытым вкладкам с разными
+    // досками было чем затирать общий кэш друг друга.
+    //
     // this check is redundant, but since this is a hot path, it's best
     // not to evaludate the nested expression every time
-    if (!LocalData.isSavePaused()) {
+    if (!eventBookingParamsRef.current && !LocalData.isSavePaused()) {
       LocalData.save(elements, appState, files, () => {
         if (excalidrawAPI) {
           let didChange = false;
@@ -878,7 +962,9 @@ const ExcalidrawWrapper = () => {
                     // через Firebase Storage, которого у нас больше нет —
                     // в EventBooking-контексте (всегда есть chatId/token)
                     // заменяем её на сохранение снимка на нашем сервере
-                    // (то же самое, что бургер-меню "Сохранить на сервер").
+                    // (то же самое, что бургер-меню "Сохранить на сервер") —
+                    // работает и при chatId="0" (личная доска, см.
+                    // sceneOwnerCondition в DrawingController).
                     if (eventBookingParams) {
                       return (
                         <SaveToServerExportCard
@@ -920,7 +1006,7 @@ const ExcalidrawWrapper = () => {
           return (
             <div className="top-right-ui">
               {collabError.message && <CollabError collabError={collabError} />}
-              {eventBookingParams && (
+              {eventBookingParams && eventBookingParams.chatId !== "0" && (
                 <InviteManagerTopButton
                   token={eventBookingParams.token}
                   collabAPI={collabAPI}
@@ -1117,6 +1203,7 @@ const ExcalidrawWrapper = () => {
         <WelcomeNotice
           token={eventBookingParams.token}
           excalidrawAPI={excalidrawAPI}
+          isAccountLevel={eventBookingParams.chatId === "0"}
         />
       )}
     </div>

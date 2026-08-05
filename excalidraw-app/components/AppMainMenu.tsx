@@ -28,6 +28,14 @@ export const AppMainMenu: React.FC<{
   ) => Promise<void>;
 }> = React.memo((props) => {
   const { eventBookingParams } = props;
+  // chatId="0" — "аккаунтный" токен без привязки к конкретному чату (см.
+  // DrawingController::actionUserTokenRedirect, выдаётся при "стандартном"
+  // открытии рисовалки без ссылки из чата). "Открыть" и "Сохранить" уже
+  // работают под chat_id=0 (см. sceneOwnerCondition в DrawingController —
+  // личная доска, своя у каждого пользователя, не общая) — только
+  // "Пригласить"/"Загрузить фото" остаются недоступны: им нужен реальный
+  // товар/чат, которого у личной доски нет.
+  const isAccountLevel = eventBookingParams?.chatId === "0";
 
   return (
     <MainMenu>
@@ -42,11 +50,15 @@ export const AppMainMenu: React.FC<{
             onReissueToken={props.onReissueToken}
             onApplyScene={props.onApplyScene}
           />
-          <MenuInviteItem token={eventBookingParams.token} />
-          <MenuGalleryItem
-            token={eventBookingParams.token}
-            excalidrawAPI={props.excalidrawAPI}
-          />
+          {!isAccountLevel && (
+            <>
+              <MenuInviteItem token={eventBookingParams.token} />
+              <MenuGalleryItem
+                token={eventBookingParams.token}
+                excalidrawAPI={props.excalidrawAPI}
+              />
+            </>
+          )}
         </>
       ) : (
         <>
