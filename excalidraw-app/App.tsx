@@ -13,6 +13,7 @@ import {
 } from "../packages/excalidraw/constants";
 import { loadFromBlob } from "../packages/excalidraw/data/blob";
 import eventBookingDefaultLibrary from "./data/eventbooking-default-library.excalidrawlib.json";
+import { EVENTBOOKING_BACKEND_URL } from "./data/eventbookingConfig";
 import type {
   FileId,
   NonDeletedExcalidrawElement,
@@ -276,7 +277,7 @@ const initializeScene = async (opts: {
     /^#(json|room|url)=/.test(window.location.hash);
   if (!hasAnyExternalIndicator) {
     window.location.href =
-      "https://eventbooking.new.local/drawing/user-token-redirect";
+      `${EVENTBOOKING_BACKEND_URL}/drawing/user-token-redirect`;
     // ничего больше не инициализируем, пока браузер не уйдёт по редиректу
     return new Promise<never>(() => {});
   }

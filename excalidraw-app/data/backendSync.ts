@@ -15,8 +15,8 @@ import {
   PLAN_IMAGE_FILE_ID,
   type GalleryImageEntry,
 } from "./planImage";
+import { EVENTBOOKING_BACKEND_URL as API_BASE_URL } from "./eventbookingConfig";
 
-const API_BASE_URL = "https://eventbooking.new.local";
 const AUTOSAVE_TIMEOUT = 1500;
 
 export interface EventBookingParams {

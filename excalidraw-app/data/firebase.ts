@@ -17,6 +17,7 @@ import {
   encryptData,
   decryptData,
 } from "../../packages/excalidraw/data/encryption";
+import { EVENTBOOKING_BACKEND_URL as API_BASE_URL } from "./eventbookingConfig";
 
 /**
  * Firebase вырезан: наш excalidraw-room (excalidraw-room-proxy,
@@ -41,8 +42,6 @@ import {
  * chat_drawing_room_file, ключ (room_id, file_id) — тот же принцип, что был
  * у публичного бакета Firebase Storage.
  */
-
-const API_BASE_URL = "https://eventbooking.new.local";
 
 const uint8ArrayToBase64 = (bytes: Uint8Array): string => {
   let binary = "";
