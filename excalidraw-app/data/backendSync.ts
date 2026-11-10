@@ -47,8 +47,12 @@ const request = async <T = any>(
   init?: RequestInit,
 ): Promise<T> => {
   const url = new URL(`${API_BASE_URL}${path}`);
-  url.searchParams.set("token", token);
-  const response = await fetch(url.toString(), init);
+  // Токен — в заголовке Authorization, не в адресе запроса: адреса попадают в
+  // журнал доступа основного сайта, а /drawing/* вызывается каждые 1,5 с.
+  // Бэкенд читает Bearer первым (DrawingController::getRequestToken).
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(url.toString(), { ...init, headers });
   if (!response.ok) {
     throw new Error(
       `EventBooking request failed: ${path} (${response.status})`,
