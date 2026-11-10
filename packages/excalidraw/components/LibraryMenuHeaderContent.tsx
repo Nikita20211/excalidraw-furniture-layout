@@ -233,7 +233,8 @@ export const LibraryDropdownMenuButton: React.FC<{
               {resetLabel}
             </DropdownMenu.Item>
           )}
-          {itemsSelected && (
+          {/* EventBooking: publishing to libraries.excalidraw.com disabled */}
+          {itemsSelected && !!import.meta.env.VITE_APP_LIBRARY_BACKEND && (
             <DropdownMenu.Item
               icon={publishIcon}
               onSelect={() => setShowPublishLibraryDialog(true)}
