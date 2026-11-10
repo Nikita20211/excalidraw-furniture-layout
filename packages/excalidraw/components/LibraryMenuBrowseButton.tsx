@@ -11,6 +11,11 @@ const LibraryMenuBrowseButton = ({
   theme: UIAppState["theme"];
   id: string;
 }) => {
+  // EventBooking: external library catalogue (libraries.excalidraw.com) disabled;
+  // our furniture library is bundled (eventbooking-default-library).
+  if (!import.meta.env.VITE_APP_LIBRARY_URL) {
+    return null;
+  }
   const referrer =
     libraryReturnUrl || window.location.origin + window.location.pathname;
   return (

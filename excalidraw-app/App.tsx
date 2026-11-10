@@ -24,7 +24,6 @@ import { t } from "../packages/excalidraw/i18n";
 import {
   Excalidraw,
   LiveCollaborationTrigger,
-  TTDDialogTrigger,
   StoreAction,
   reconcileElements,
 } from "../packages/excalidraw";
@@ -69,7 +68,6 @@ import CustomStats from "./CustomStats";
 import type { RestoredDataState } from "../packages/excalidraw/data/restore";
 import { restore, restoreAppState } from "../packages/excalidraw/data/restore";
 import {
-  ExportToExcalidrawPlus,
   exportToExcalidrawPlus,
 } from "./components/ExportToExcalidrawPlus";
 import { SaveToServerExportCard } from "./components/eventbooking/SaveToServerExportCard";
@@ -132,7 +130,6 @@ import DebugCanvas, {
   isVisualDebuggerEnabled,
   loadSavedDebugState,
 } from "./components/DebugCanvas";
-import { AIComponents } from "./components/AI";
 import { ExcalidrawPlusIframeExport } from "./ExcalidrawPlusIframeExport";
 import { isElementLink } from "../packages/excalidraw/element/elementLink";
 
@@ -979,16 +976,8 @@ const ExcalidrawWrapper = () => {
                       );
                     }
 
-                    return (
-                      <ExportToExcalidrawPlus
-                        elements={elements}
-                        appState={appState}
-                        files={files}
-                        name={excalidrawAPI.getName()}
-                        onError={onError}
-                        onSuccess={onSuccess}
-                      />
-                    );
+                    // EventBooking: no Excalidraw+ export outside board context
+                    return <></>;
                   }
                 : undefined,
             },
@@ -1048,27 +1037,10 @@ const ExcalidrawWrapper = () => {
         <OverwriteConfirmDialog>
           <OverwriteConfirmDialog.Actions.ExportToImage />
           <OverwriteConfirmDialog.Actions.SaveToDisk />
-          {excalidrawAPI && (
-            <OverwriteConfirmDialog.Action
-              title={t("overwriteConfirm.action.excalidrawPlus.title")}
-              actionLabel={t("overwriteConfirm.action.excalidrawPlus.button")}
-              onClick={() => {
-                exportToExcalidrawPlus(
-                  excalidrawAPI.getSceneElements(),
-                  excalidrawAPI.getAppState(),
-                  excalidrawAPI.getFiles(),
-                  excalidrawAPI.getName(),
-                );
-              }}
-            >
-              {t("overwriteConfirm.action.excalidrawPlus.description")}
-            </OverwriteConfirmDialog.Action>
-          )}
         </OverwriteConfirmDialog>
         <AppFooter onChange={() => excalidrawAPI?.refresh()} />
-        {excalidrawAPI && <AIComponents excalidrawAPI={excalidrawAPI} />}
+        {/* EventBooking: AI (oss-ai.excalidraw.com) disabled */}
 
-        <TTDDialogTrigger />
         {isCollaborating && isOffline && (
           <div className="collab-offline-warning">
             {t("alerts.collabOfflineWarning")}
@@ -1154,7 +1126,8 @@ const ExcalidrawWrapper = () => {
               label: t("overwriteConfirm.action.excalidrawPlus.button"),
               category: DEFAULT_CATEGORIES.export,
               icon: exportToPlus,
-              predicate: true,
+              // EventBooking: Excalidraw+ export disabled
+              predicate: false,
               keywords: ["plus", "export", "save", "backup"],
               perform: () => {
                 if (excalidrawAPI) {
